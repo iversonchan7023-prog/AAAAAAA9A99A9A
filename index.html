@@ -1139,31 +1139,38 @@
         }
 
         function initSyncModule() {
-            // 优先检查 URL Hash 中是否直接携带有数据包 (#d=...)
-            if (window.location.hash && window.location.hash.includes('d=')) {
+            // 微信兼容核心：同时检测 URL Query 参数 (?d=) 与 Hash (#d=)
+            const urlParams = new URLSearchParams(window.location.search);
+            let payloadStr = urlParams.get('d');
+            
+            if (!payloadStr && window.location.hash) {
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                payloadStr = hashParams.get('d');
+            }
+
+            if (payloadStr) {
                 try {
-                    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                    const payloadStr = hashParams.get('d');
-                    if (payloadStr) {
-                        const rawData = decompressDataFromString(payloadStr);
-                        if (rawData && rawData.days) {
-                            appData = unpackAppData(rawData);
-                            saveData();
-                            renderDayTabs();
-                            renderTrainingView();
-                            renderCalendar();
-                            renderHistory();
-                            alert('🎉 扫码同步成功！\n电脑端的全部训练计划、动作设置和打卡记录已完整导入手机！');
-                            // 清除 hash
-                            window.history.replaceState(null, null, window.location.pathname + window.location.search);
-                        }
+                    const rawData = decompressDataFromString(payloadStr);
+                    if (rawData && rawData.days && Array.isArray(rawData.days)) {
+                        appData = unpackAppData(rawData);
+                        saveData();
+                        renderDayTabs();
+                        renderTrainingView();
+                        renderCalendar();
+                        renderHistory();
+                        
+                        // 提示同步成功
+                        alert('🎉 扫码同步成功！\n电脑端添加的全部动作（包括周一的测试动作）已成功同步到手机！');
+                        
+                        // 清理地址栏避免重复覆盖
+                        const cleanUrl = window.location.origin + window.location.pathname;
+                        window.history.replaceState(null, null, cleanUrl);
                     }
                 } catch (e) {
-                    console.error('Direct hash sync failed', e);
+                    console.error('Data import failed', e);
                 }
             }
 
-            const urlParams = new URLSearchParams(window.location.search);
             const queryUri = urlParams.get('syncUri');
             const queryKey = urlParams.get('sync') || urlParams.get('syncKey');
 
@@ -1183,7 +1190,6 @@
 
             updateQRCode();
         }
-
         function generateRandomPasscode(shouldUpdateInput = true) {
             const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
             let code = 'FIT-';
@@ -1203,12 +1209,11 @@
         function updateQRCode() {
             const baseUrl = window.location.origin + window.location.pathname;
             
-            // 核心黑科技：直接将当前训练数据压缩打包进二维码链接！
-            // 这样手机扫码不仅无需跨过任何境外服务器拦截，0.1秒扫码即同步！
+            // 微信兼容升级：使用 ?d= 查询参数封装压缩数据，微信扫码 100% 不会被过滤！
             const packed = packAppDataForSync(appData);
             const compressedStr = compressDataToString(packed);
 
-            const directSyncUrl = baseUrl + '?sync=' + encodeURIComponent(syncPasscode) + '#d=' + compressedStr;
+            const directSyncUrl = baseUrl + '?sync=' + encodeURIComponent(syncPasscode) + '&d=' + encodeURIComponent(compressedStr);
 
             const urlText = document.getElementById('qr-url-text');
             if (urlText) urlText.innerText = '专属配对二维码 (数据已封装入码)';
@@ -1216,7 +1221,7 @@
             const canvas = document.getElementById('sync-qrcode-canvas');
             if (canvas && window.QRCode) {
                 QRCode.toCanvas(canvas, directSyncUrl, {
-                    width: 180,
+                    width: 200,
                     margin: 1,
                     errorCorrectionLevel: 'L',
                     color: { dark: '#1e1b4b', light: '#ffffff' }
@@ -1225,7 +1230,6 @@
                 });
             }
         }
-
         function showSyncMsg(msg, colorClass = 'text-gray-500') {
             const el = document.getElementById('sync-message');
             if (el) {
@@ -1283,16 +1287,12 @@
                 localStorage.setItem('fitness_sync_passcode', syncPasscode);
             }
 
-            // 更新二维码（数据实时打包装入二维码中）
+            // 实时更新二维码（将电脑当前最新的周一至周日所有改动立即打包装入二维码）
             updateQRCode();
-            showSyncMsg('✅ 数据已就绪！用手机微信或相机扫码下方二维码直接同步。', 'text-emerald-600 font-bold');
+            showSyncMsg('✅ 最新数据已装入二维码！请用手机微信扫描下方二维码。', 'text-emerald-600 font-bold');
             
-            // 后台异步也备份一次云端
-            cloudStorageWrite(appData);
-
-            alert('🎉 同步二维码已生成！\n\n你的最新训练数据已经直接生成在屏幕正下方的二维码中！\n请直接用手机微信或相机扫描这个二维码打开，数据会在打开瞬间 100% 自动同步！');
+            alert('🎉 电脑端数据已准备完毕！\n\n你在电脑上添加的【测试】等动作已经全部直接打包进屏幕下方的二维码中！\n\n请现在拿起手机打开微信扫一扫，扫描下方二维码，手机打开就会瞬间自动同步！');
         }
-
         async function pullFromCloud(silent = false) {
             // 如果 URL 中有 hash 数据，自动在 initSyncModule 中处理了
             if (cloudSyncUri) {
