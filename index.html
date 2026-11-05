@@ -169,21 +169,37 @@
                 <div id="sync-message" class="text-xs text-center font-medium min-h-[18px] text-gray-500"></div>
             </div>
 
-            <!-- 手机扫码直达卡片 -->
-            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
-                <h3 class="font-bold text-gray-800 text-sm flex items-center gap-2">
-                    <i class="fa-solid fa-qrcode text-indigo-600"></i> 手机微信 / 相机扫码直达
-                </h3>
+            <!-- 手机一键直连与扫码同步卡片 -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-bold text-gray-800 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-qrcode text-indigo-600"></i> 双端数据互通与扫码
+                    </h3>
+                    <span class="text-[11px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-semibold">
+                        数据已直载入码
+                    </span>
+                </div>
+
                 <p class="text-xs text-gray-400 leading-relaxed">
-                    电脑端设定好口令后，用手机微信或相机扫描下方二维码直接打开，口令将自动带入并立即从云端同步训练数据。
+                    电脑端点击上方【保存并推送】后，数据已直接装入下方。你可以直接用微信扫码，或者点击下方的【复制直连链接】发送到手机微信打开。
                 </p>
-                <div class="flex flex-col items-center justify-center py-2 bg-gray-50 rounded-xl border border-gray-100">
+
+                <!-- 二维码展示区 -->
+                <div class="flex flex-col items-center justify-center py-3 bg-gray-50 rounded-xl border border-gray-100">
                     <canvas id="sync-qrcode-canvas" class="rounded-lg shadow-sm bg-white p-2"></canvas>
-                    <span id="qr-url-text" class="text-[11px] font-mono text-gray-400 mt-2 max-w-xs truncate text-center px-2"></span>
+                    <span id="qr-url-text" class="text-[11px] font-mono text-emerald-600 font-semibold mt-2 text-center">
+                        ✅ 电脑最新训练动作已封装入码
+                    </span>
+                </div>
+
+                <!-- 备选方案：一键复制直连链接发微信 -->
+                <div class="pt-1">
+                    <button onclick="copyDirectSyncLink()" class="w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 active:scale-95">
+                        <i class="fa-regular fa-copy"></i> 复制直连链接（发到微信打开即同步）
+                    </button>
                 </div>
             </div>
-
-            <!-- 本地 JSON 文件备份 -->
+<!-- 本地 JSON 文件备份 -->
             <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 space-y-3">
                 <h3 class="font-bold text-gray-800 text-sm flex items-center gap-2">
                     <i class="fa-solid fa-file-code text-gray-500"></i> 本地 JSON 文件备份
@@ -1035,38 +1051,14 @@
             const file = event.target.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const importedData = JSON.parse(e.target.result);
-                    if (importedData.days && Array.isArray(importedData.days)) {
-                        appData = importedData;
-                        saveData();
-                        renderDayTabs();
-                        renderTrainingView();
-                        renderCalendar();
-                        renderHistory();
-                        alert("✅ 数据成功恢复！");
-                    } else {
-                        alert("⚠️ 文件格式不正确。");
-                    }
-                } catch (err) {
-                    alert("⚠️ 导入失败，解析出错。");
-                }
-            };
-            reader.readAsText(file);
-        }
-    
-        // ================= 跨端云同步逻辑 (二维码直传 + 云端双保险) =================
+            const reader = new// ================= 跨端云同步逻辑 (二维码直传 + 链接直通 + P2P双保险) =================
         let syncPasscode = localStorage.getItem('fitness_sync_passcode') || 'FIT-ARUR9J';
-        let cloudSyncUri = localStorage.getItem('fitness_cloud_uri') || '';
+        let latestDirectSyncUrl = '';
 
-        // 数据脱敏打包：因为动作图片已经在网页默认模板里了，同步时剔除默认图片，数据包压缩到仅几百字节！
         function packAppDataForSync(data) {
             const copy = JSON.parse(JSON.stringify(data));
             copy.days.forEach((day, dIdx) => {
                 day.exercises.forEach((ex, eIdx) => {
-                    // 如果是预设的图，无需重复网络传输，标记即可
                     if (ex.images && ex.images.length > 0) {
                         ex._hasImg = true;
                         ex.images = [];
@@ -1076,7 +1068,6 @@
             return copy;
         }
 
-        // 解包数据：自动还原预设动作图片
         function unpackAppData(importedData) {
             if (!importedData || !importedData.days) return importedData;
             importedData.days.forEach((day, dIdx) => {
@@ -1096,13 +1087,11 @@
             return importedData;
         }
 
-        // 将数据用 pako 压缩为 Base64 字符串
         function compressDataToString(dataObj) {
             try {
                 if (window.pako) {
                     const jsonStr = JSON.stringify(dataObj);
                     const deflated = pako.deflate(jsonStr, { to: 'string' });
-                    // 转换为 base64
                     let binary = '';
                     const bytes = new Uint8Array(deflated);
                     for (let i = 0; i < bytes.byteLength; i++) {
@@ -1111,12 +1100,11 @@
                     return btoa(binary);
                 }
             } catch (e) {
-                console.warn('pako compress error', e);
+                console.warn('pako error', e);
             }
             return encodeURIComponent(JSON.stringify(dataObj));
         }
 
-        // 解压缩
         function decompressDataFromString(str) {
             try {
                 if (window.pako) {
@@ -1129,7 +1117,7 @@
                     return JSON.parse(inflated);
                 }
             } catch (e) {
-                console.warn('pako decompress error, fallback to json', e);
+                console.warn('pako decompress fail, try raw json', e);
             }
             try {
                 return JSON.parse(decodeURIComponent(str));
@@ -1138,50 +1126,46 @@
             }
         }
 
-        function initSyncModule() {
-            // 微信兼容核心：同时检测 URL Query 参数 (?d=) 与 Hash (#d=)
+        // 尝试解析并应用从 URL 传来的数据（带重试等待 pako 加载完成）
+        function checkAndApplyPayloadFromUrl(attempts = 5) {
             const urlParams = new URLSearchParams(window.location.search);
             let payloadStr = urlParams.get('d');
-            
             if (!payloadStr && window.location.hash) {
                 const hashParams = new URLSearchParams(window.location.hash.substring(1));
                 payloadStr = hashParams.get('d');
             }
 
-            if (payloadStr) {
-                try {
-                    const rawData = decompressDataFromString(payloadStr);
-                    if (rawData && rawData.days && Array.isArray(rawData.days)) {
-                        appData = unpackAppData(rawData);
-                        saveData();
-                        renderDayTabs();
-                        renderTrainingView();
-                        renderCalendar();
-                        renderHistory();
-                        
-                        // 提示同步成功
-                        alert('🎉 扫码同步成功！\n电脑端添加的全部动作（包括周一的测试动作）已成功同步到手机！');
-                        
-                        // 清理地址栏避免重复覆盖
-                        const cleanUrl = window.location.origin + window.location.pathname;
-                        window.history.replaceState(null, null, cleanUrl);
-                    }
-                } catch (e) {
-                    console.error('Data import failed', e);
+            if (!payloadStr) return;
+
+            // 如果 pako 还没加载好，等待 200ms 重试
+            if (!window.pako && attempts > 0) {
+                setTimeout(() => checkAndApplyPayloadFromUrl(attempts - 1), 200);
+                return;
+            }
+
+            try {
+                const rawData = decompressDataFromString(payloadStr);
+                if (rawData && rawData.days && Array.isArray(rawData.days)) {
+                    appData = unpackAppData(rawData);
+                    saveData();
+                    renderDayTabs();
+                    renderTrainingView();
+                    renderCalendar();
+                    renderHistory();
+
+                    alert('🎉 数据同步成功！\n\n电脑端修改/添加的全部训练项目（包括周一的测试动作）已完整导入手机！');
+
+                    // 清除地址栏参数，避免刷新时被旧数据反复覆盖
+                    const cleanUrl = window.location.origin + window.location.pathname;
+                    window.history.replaceState(null, null, cleanUrl);
                 }
+            } catch (err) {
+                console.error('Apply payload failed', err);
             }
+        }
 
-            const queryUri = urlParams.get('syncUri');
-            const queryKey = urlParams.get('sync') || urlParams.get('syncKey');
-
-            if (queryUri) {
-                cloudSyncUri = decodeURIComponent(queryUri).trim();
-                localStorage.setItem('fitness_cloud_uri', cloudSyncUri);
-            }
-            if (queryKey) {
-                syncPasscode = queryKey.trim();
-                localStorage.setItem('fitness_sync_passcode', syncPasscode);
-            }
+        function initSyncModule() {
+            checkAndApplyPayloadFromUrl();
 
             const input = document.getElementById('sync-passcode-input');
             if (input) {
@@ -1190,6 +1174,7 @@
 
             updateQRCode();
         }
+
         function generateRandomPasscode(shouldUpdateInput = true) {
             const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
             let code = 'FIT-';
@@ -1202,25 +1187,20 @@
                 const input = document.getElementById('sync-passcode-input');
                 if (input) input.value = syncPasscode;
                 updateQRCode();
-                showSyncMsg('已生成新口令，请点击【保存并推送到云端】', 'text-indigo-600');
+                showSyncMsg('已生成新口令，请点击【保存并推送】', 'text-indigo-600');
             }
         }
 
         function updateQRCode() {
             const baseUrl = window.location.origin + window.location.pathname;
-            
-            // 微信兼容升级：使用 ?d= 查询参数封装压缩数据，微信扫码 100% 不会被过滤！
             const packed = packAppDataForSync(appData);
             const compressedStr = compressDataToString(packed);
 
-            const directSyncUrl = baseUrl + '?sync=' + encodeURIComponent(syncPasscode) + '&d=' + encodeURIComponent(compressedStr);
-
-            const urlText = document.getElementById('qr-url-text');
-            if (urlText) urlText.innerText = '专属配对二维码 (数据已封装入码)';
+            latestDirectSyncUrl = baseUrl + '?sync=' + encodeURIComponent(syncPasscode) + '&d=' + encodeURIComponent(compressedStr);
 
             const canvas = document.getElementById('sync-qrcode-canvas');
             if (canvas && window.QRCode) {
-                QRCode.toCanvas(canvas, directSyncUrl, {
+                QRCode.toCanvas(canvas, latestDirectSyncUrl, {
                     width: 200,
                     margin: 1,
                     errorCorrectionLevel: 'L',
@@ -1230,53 +1210,28 @@
                 });
             }
         }
+
+        function copyDirectSyncLink() {
+            if (!latestDirectSyncUrl) updateQRCode();
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(latestDirectSyncUrl).then(() => {
+                    alert('✅ 直连同步链接已复制！\n\n请在电脑微信上粘贴发到【文件传输助手】，在手机微信中点击该链接打开，即可 100% 自动同步完成！');
+                }).catch(() => fallbackCopyPrompt());
+            } else {
+                fallbackCopyPrompt();
+            }
+        }
+
+        function fallbackCopyPrompt() {
+            prompt('请复制下方直连链接，通过微信发给手机打开即同步：', latestDirectSyncUrl);
+        }
+
         function showSyncMsg(msg, colorClass = 'text-gray-500') {
             const el = document.getElementById('sync-message');
             if (el) {
                 el.className = 'text-xs text-center font-medium min-h-[18px] ' + colorClass;
                 el.innerText = msg;
             }
-        }
-
-        // 云端存储：多节点自动重试
-        async function cloudStorageWrite(data) {
-            const packed = packAppDataForSync(data);
-            const payload = JSON.stringify(packed);
-            
-            // 尝试 1: jsonstorage
-            try {
-                const res = await fetch('https://api.jsonstorage.net/v1/json', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: payload
-                });
-                if (res.ok) {
-                    const resJson = await res.json();
-                    if (resJson && resJson.uri) {
-                        cloudSyncUri = resJson.uri;
-                        localStorage.setItem('fitness_cloud_uri', cloudSyncUri);
-                        return { success: true, uri: cloudSyncUri };
-                    }
-                }
-            } catch (e) {}
-
-            return { success: true, uri: '' };
-        }
-
-        async function cloudStorageRead(targetUri) {
-            const fetchUri = targetUri || cloudSyncUri;
-            if (!fetchUri || !fetchUri.startsWith('http')) return null;
-
-            try {
-                const res = await fetch(fetchUri + '?t=' + Date.now());
-                if (res.ok) {
-                    const json = await res.json();
-                    if (json && json.days) {
-                        return unpackAppData(json);
-                    }
-                }
-            } catch (e) {}
-            return null;
         }
 
         async function saveAndPushCloud() {
@@ -1287,14 +1242,21 @@
                 localStorage.setItem('fitness_sync_passcode', syncPasscode);
             }
 
-            // 实时更新二维码（将电脑当前最新的周一至周日所有改动立即打包装入二维码）
+            // 将最新数据立即打包装入二维码与直连链接中
             updateQRCode();
-            showSyncMsg('✅ 最新数据已装入二维码！请用手机微信扫描下方二维码。', 'text-emerald-600 font-bold');
+            showSyncMsg('✅ 最新训练数据已成功封装就绪！', 'text-emerald-600 font-bold');
             
-            alert('🎉 电脑端数据已准备完毕！\n\n你在电脑上添加的【测试】等动作已经全部直接打包进屏幕下方的二维码中！\n\n请现在拿起手机打开微信扫一扫，扫描下方二维码，手机打开就会瞬间自动同步！');
+            alert('🎉 电脑端数据封装成功！\n\n周一添加的【测试】等动作已实时打入屏幕下方的二维码与直连链接中！\n\n👉 方式 1：用手机微信直接扫描屏幕下方的二维码打开。\n👉 方式 2：点击【复制直连链接】发到微信文件传输助手，手机点开链接即秒同步！');
         }
+
         async function pullFromCloud(silent = false) {
-            // 如果 URL 中有 hash 数据，自动在 initSyncModule 中处理了
+            checkAndApplyPayloadFromUrl();
+            if (!silent) {
+                alert('提示：请直接使用手机微信扫描电脑屏幕上的【二维码】打开，或者在电脑上点击【复制直连链接】发到微信里点开，手机就会自动完成同步！');
+            }
+        }
+
+        中有 hash 数据，自动在 initSyncModule 中处理了
             if (cloudSyncUri) {
                 showSyncMsg('正在从云端拉取数据...', 'text-indigo-600');
                 const remoteData = await cloudStorageRead(cloudSyncUri);
