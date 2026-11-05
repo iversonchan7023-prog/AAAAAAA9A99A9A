@@ -3,7 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { KeyRound, QrCode, Download, Upload, RefreshCw, Cloud, Check } from 'lucide-react';
 import { useApp } from '@/lib/appContext';
 import { generateSyncKey } from '@/lib/defaultData';
-import { isSupabaseConfigured } from '@/lib/supabaseClient';
+import { isCloudConfigured } from '@/lib/cloudClient';
 import type { AppData } from '@/lib/types';
 
 export default function SettingsView() {
@@ -75,7 +75,7 @@ export default function SettingsView() {
         </button>
 
         <div className="mt-3 flex items-center gap-2 text-xs">
-          {isSupabaseConfigured ? (
+          {isCloudConfigured() ? (
             <>
               <Cloud size={14} className="text-emerald-500" />
               <span className="text-slate-500">云端同步已启用</span>

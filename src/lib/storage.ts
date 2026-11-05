@@ -1,6 +1,6 @@
 import type { AppData } from './types';
 import { createDefaultData } from './defaultData';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { isCloudConfigured, entryUrl, visibilityUrl, writeHeaders } from './cloudClient';
 
 const LOCAL_KEY = 'fittrack_local_data';
 const SYNC_KEY_STORE = 'fittrack_sync_key';
@@ -33,42 +33,65 @@ export function clearLocal(): void {
 }
 
 /**
- * Pull remote data for the sync key. Returns null if none exists or supabase not configured.
+ * Pull remote data for the sync key from MantleDB.
+ * Returns null if the entry doesn't exist yet or the network fails.
  */
 export async function pullRemote(syncKey: string): Promise<AppData | null> {
-  if (!isSupabaseConfigured || !syncKey) return null;
-  const { data, error } = await supabase
-    .from('fitness_sync_data')
-    .select('payload')
-    .eq('sync_key', syncKey)
-    .maybeSingle();
-  if (error) {
-    console.warn('pullRemote error', error.message);
+  if (!isCloudConfigured() || !syncKey) return null;
+  try {
+    const res = await fetch(entryUrl(syncKey), {
+      method: 'GET',
+      headers: { 'X-Mantle-Key': writeHeaders()['X-Mantle-Key'] },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      console.warn('pullRemote failed', res.status);
+      return null;
+    }
+    const body = await res.json();
+    // MantleDB returns the stored JSON directly; older entries may nest under payload.
+    const candidate = (body as AppData) ?? (body?.payload as AppData | undefined);
+    if (candidate && Array.isArray(candidate.weekPlan)) return candidate;
+    return null;
+  } catch (e) {
+    console.warn('pullRemote error', e);
     return null;
   }
-  if (!data) return null;
-  return (data.payload as AppData) ?? null;
 }
 
 /**
- * Push local data to remote (upsert).
+ * Push local data to remote (overwrite the entry for this sync key).
  */
 export async function pushRemote(data: AppData): Promise<boolean> {
-  if (!isSupabaseConfigured || !data.syncKey) return false;
-  const payload = { ...data, lastSyncedAt: new Date().toISOString() };
-  const { error } = await supabase
-    .from('fitness_sync_data')
-    .upsert({ sync_key: data.syncKey, payload, updated_at: new Date().toISOString() });
-  if (error) {
-    console.warn('pushRemote error', error.message);
+  if (!isCloudConfigured() || !data.syncKey) return false;
+  try {
+    const payload = { ...data, lastSyncedAt: new Date().toISOString() };
+    const res = await fetch(entryUrl(data.syncKey), {
+      method: 'POST',
+      headers: writeHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.warn('pushRemote failed', res.status);
+      return false;
+    }
+    // Ensure the entry is publicly readable so other devices can fetch it
+    // without embedding the write key in every request.
+    await fetch(visibilityUrl(data.syncKey), {
+      method: 'PUT',
+      headers: writeHeaders(),
+      body: JSON.stringify({ public_read: true }),
+    }).catch(() => undefined);
+    return true;
+  } catch (e) {
+    console.warn('pushRemote error', e);
     return false;
   }
-  return true;
 }
 
 /**
- * Merge remote into local: remote wins on conflict for shared fields, but keep
- * local history that remote may not have (append-only merge by id).
+ * Merge remote into local: keep the union of history (by id), and prefer the
+ * weekPlan with more in-progress completed sets so neither device loses progress.
  */
 export function mergeData(local: AppData, remote: AppData): AppData {
   const remoteIds = new Set(remote.history.map((h) => h.id));
@@ -76,13 +99,11 @@ export function mergeData(local: AppData, remote: AppData): AppData {
     ...remote.history,
     ...local.history.filter((h) => !remoteIds.has(h.id)),
   ];
-  // remote weekPlan wins, but keep any local-only completedSets progress if remote older
   const merged: AppData = {
     ...remote,
     history: mergedHistory.sort((a, b) => (a.date < b.date ? 1 : -1)),
     syncKey: local.syncKey || remote.syncKey,
   };
-  // prefer the weekPlan with more recent activity (higher total completedSets)
   const localProgress = totalProgress(local);
   const remoteProgress = totalProgress(remote);
   if (localProgress > remoteProgress) {
@@ -101,7 +122,7 @@ function totalProgress(d: AppData): number {
 
 export async function syncNow(data: AppData): Promise<AppData> {
   saveLocal(data);
-  if (!isSupabaseConfigured || !data.syncKey) return data;
+  if (!isCloudConfigured() || !data.syncKey) return data;
   const remote = await pullRemote(data.syncKey);
   if (!remote) {
     await pushRemote(data);
